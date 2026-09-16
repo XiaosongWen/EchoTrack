@@ -27,14 +27,14 @@ Three tables, one self-referential relationship:
 |---|---|---|
 | `id` | UUID | PK |
 | `user_id` | UUID | FK → users |
-| `type` | `enum` | `habit` / `goal` / `task` / `list` |
+| `type` | `enum` | `habit` / `goal` / `task` |
 | `title` | `varchar(255)` | |
 | `description` | `text` | Optional verbose description |
 | `status` | `enum` | `active` / `in_progress` / `archived` / `completed` / `paused` |
 | `priority` | `enum` | `none` / `low` / `medium` / `high` |
 | `config` | `jsonb` | Type-specific configuration (see below) |
 | `due_date` | `date` | Optional deadline (tasks, goals) |
-| `sort_order` | `integer` | Manual ordering |
+| `sort_order` | `integer` | Manual ordering within a group; also used for checklist item order on tasks |
 | `created_at` | `timestamptz` | |
 | `updated_at` | `timestamptz` | |
 
@@ -50,8 +50,9 @@ Three tables, one self-referential relationship:
   "target_value": 100,                   // e.g. "100 books"
   "unit": "books" }
 
-// type: task — no extra config, `status` field is sufficient
-// type: list — no extra config
+// type: task — no extra config, `status` field is sufficient.
+// A task may carry checklist items as records (status: done/not_done, sort_order set).
+// When any records exist with sort_order set, the UI renders them as a checklist.
 ```
 
 ### 2.2 `commitment_links` — Parent-Child Hierarchy
@@ -76,7 +77,7 @@ Three tables, one self-referential relationship:
 | `content` | `text` | Free-text note / description |
 | `status` | `enum` | `done` / `not_done` / `partial` / `skip` |
 | `value` | `numeric` | Optional: for progress tracking (e.g., "ran 5 km") |
-| `sort_order` | `integer` | For list-type commitments, each item's order |
+| `sort_order` | `integer` | Checklist item order when records are used as task checklist items |
 | `created_at` | `timestamptz` | |
 
 ---
@@ -137,18 +138,20 @@ Commitment (type: task): "Design mobile UI"
 - Records on a task serve as **activity log / history** — what happened when
 - Status transitions can be recorded via records for future audit
 
-### 3.4 Shopping List / Checklist
+**Checklist mode (replaces the former `list` type):**
 
 ```
-Commitment (type: list): "Grocery shopping"
-├── Record (sort_order: 1, content: "Milk", status: not_done)
-├── Record (sort_order: 2, content: "Eggs", status: done)
+Commitment (type: task): "Grocery Shopping"
+├── status: in_progress
+├── Record (sort_order: 1, content: "Milk",  status: not_done)
+├── Record (sort_order: 2, content: "Eggs",  status: done)
 └── Record (sort_order: 3, content: "Bread", status: not_done)
 ```
 
-- Each list item is a record
-- Progress = done / total records
-- Simple, no sub-sub-items needed
+- A task enters checklist mode when it has one or more records with `sort_order` set
+- Progress = `done` records / total records (same formula, no new logic)
+- The UI detects checklist mode from the presence of ordered records and renders them inline
+- No schema change required — checklist items are just records with `sort_order` populated
 
 ### 3.5 Planner / Daily Log
 
@@ -186,7 +189,7 @@ DELETE /api/v1/pursuits/commitments/:id         — Delete
 
 **List filters:**
 ```
-?type=habit|goal|task|list
+?type=habit|goal|task
 &status=active|in_progress|archived|completed|paused
 &priority=high|medium|low
 &parent_id=uuid       — children of a specific commitment
@@ -200,7 +203,7 @@ DELETE /api/v1/pursuits/commitments/:id         — Delete
 
 ```jsonc
 "progress": {
-  "method": "streak" | "percentage" | "auto_sub" | "checklist" | "records",
+  "method": "streak" | "percentage" | "auto_sub" | "checklist" | "checklist_items" | "records",
   "done": 32,
   "total": 100,
   "percent": 32,
@@ -211,7 +214,8 @@ DELETE /api/v1/pursuits/commitments/:id         — Delete
 - **streak:** For habits; backend computes this by traversing consecutive `done` records backward from today/yesterday.
 - **percentage:** For goals with `progress_type: "percentage"` — `done` = sum of record values, `total` = target_value.
 - **auto_sub:** Average percent of children (goal with sub-goals).
-- **checklist:** Children with `status = completed` / total children.
+- **checklist:** Children with `status = completed` / total children (goal with checklist progress type).
+- **checklist_items:** Records with `sort_order` set and `status = done` / total such records (task in checklist mode).
 - **records:** Default fallback — zero progress.
 
 ### 4.3 Records
@@ -393,3 +397,4 @@ Migration path:
 | `records` without a commitment_id | **Nullable** | Enables free-form planner entries without forcing a commitment creation |
 | `commitment_links` PK | **Composite `(parent_id, child_id)`** | Natural unique constraint; no need for a surrogate ID on a join table |
 | Tags deferred | **Not migrated** | Old `tags`/`task_tags` dropped; tagging will be redesigned as a cross-cutting system for all content types |
+| `list` type removed; merged into `task` | **Task with checklist-mode records** | A "list" is just a task where items are ordered records. Removing the type simplifies the mental model, the filter UI, and the enum without any schema change — checklist mode is detected automatically when records with `sort_order` exist on a task |

@@ -7,7 +7,6 @@ const TYPES = [
   { id: "habit", icon: "🔄", label: "Habit" },
   { id: "goal", icon: "🎯", label: "Goal" },
   { id: "task", icon: "📋", label: "Task" },
-  { id: "list", icon: "📝", label: "List" },
 ];
 
 export default function CreateCommitmentModal({ defaultType = "habit", commitmentToEdit = null, onClose }) {

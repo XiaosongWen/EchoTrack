@@ -9,7 +9,7 @@ from schemas.label import LabelResponse
 class CommitmentBase(BaseModel):
     title: str = Field(..., max_length=255)
     description: Optional[str] = None
-    type: str = Field(..., max_length=50) # habit, goal, task, list
+    type: str = Field(..., max_length=50) # habit, goal, task
     status: str = Field("active", max_length=50) # active, in_progress, archived, completed, paused
     priority: str = Field("none", max_length=50) # none, low, medium, high
     config: Optional[Dict[str, Any]] = None

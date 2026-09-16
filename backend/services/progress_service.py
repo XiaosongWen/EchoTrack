@@ -49,6 +49,9 @@ class ProgressService:
             elif progress_type == 'auto_sub':
                 return await ProgressService._compute_auto_sub_progress(db, commitment)
 
+        elif commitment.type == 'task':
+            return await ProgressService._compute_task_checklist_progress(db, commitment)
+
         # Default fallback
         return ProgressMetrics(method='records', done=0, total=0, percent=0)
 
@@ -80,6 +83,11 @@ class ProgressService:
         ]
         if percentage_goals:
             results.update(await ProgressService._batch_percentage_progress(db, percentage_goals))
+
+        # Batch: task checklist items
+        tasks = [c for c in commitments if c.type == 'task']
+        if tasks:
+            results.update(await ProgressService._batch_task_checklist_progress(db, tasks))
 
         # Fallback for the rest (checklist, auto_sub, unknown types)
         remaining = [c for c in commitments if c.id not in results]
@@ -193,3 +201,59 @@ class ProgressService:
 
         avg_percent = total_percent / len(children)
         return ProgressMetrics(method='auto_sub', done=0, total=0, percent=avg_percent)
+
+    @staticmethod
+    async def _batch_task_checklist_progress(
+        db: AsyncSession, tasks: list[Commitment],
+    ) -> dict[UUID, ProgressMetrics]:
+        """Batch checklist_items progress for all tasks.
+
+        A task is in checklist mode when it has records with sort_order set.
+        Progress = done records / total ordered records.
+        Tasks with no ordered records get method='records' with zero progress.
+        """
+        ids = [t.id for t in tasks]
+        rows = (await db.execute(
+            select(Record.commitment_id, Record.status)
+            .where(
+                Record.commitment_id.in_(ids),
+                Record.sort_order.is_not(None),
+            )
+        )).all()
+
+        # Group by task
+        counts: dict[UUID, dict] = {}
+        for row in rows:
+            entry = counts.setdefault(row.commitment_id, {'done': 0, 'total': 0})
+            entry['total'] += 1
+            if row.status == 'done':
+                entry['done'] += 1
+
+        result = {}
+        for t in tasks:
+            if t.id in counts:
+                done = counts[t.id]['done']
+                total = counts[t.id]['total']
+                percent = (done / total * 100) if total > 0 else 0
+                result[t.id] = ProgressMetrics(
+                    method='checklist_items', done=done, total=total, percent=percent
+                )
+            else:
+                result[t.id] = ProgressMetrics(method='records', done=0, total=0, percent=0)
+        return result
+
+    @staticmethod
+    async def _compute_task_checklist_progress(db: AsyncSession, task: Commitment) -> ProgressMetrics:
+        """Single-task checklist_items progress (used for individual lookups)."""
+        rows = (await db.execute(
+            select(Record.status)
+            .where(Record.commitment_id == task.id, Record.sort_order.is_not(None))
+        )).scalars().all()
+
+        total = len(rows)
+        if total == 0:
+            return ProgressMetrics(method='records', done=0, total=0, percent=0)
+
+        done = sum(1 for s in rows if s == 'done')
+        percent = (done / total) * 100
+        return ProgressMetrics(method='checklist_items', done=done, total=total, percent=percent)
