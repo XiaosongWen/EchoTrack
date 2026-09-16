@@ -48,5 +48,3 @@ Completed
 | Missing `app.dependency_overrides` during unit tests | 1 | Added default `get_current_user` override with `test_user` fixture in `conftest.py` |
 | `app.dependency_overrides.clear()` wiping auth overrides in envelope tests | 1 | Changed teardown to `app.dependency_overrides.pop(get_db, None)` |
 | `supabaseUrl is required` during vitest runs | 1 | Added placeholder fallbacks in `utils/supabase.js` and `envDir: "../"` in `vitest.config.js` |
-| `HMAC key must not be empty` in CI pytest | 1 | Added `DEFAULT_FALLBACK_JWT_SECRET` in `core/auth.py` and `test_auth.py` when `SUPABASE_JWT_SECRET` env is empty in CI |
-
