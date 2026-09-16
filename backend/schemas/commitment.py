@@ -45,7 +45,7 @@ class ProgressMetrics(BaseModel):
 
 class CommitmentRead(CommitmentBase):
     id: UUID
-    user_id: int
+    user_id: UUID
     created_at: datetime
     updated_at: datetime
     parent_id: Optional[UUID] = None

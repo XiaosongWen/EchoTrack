@@ -15,7 +15,7 @@ DEFAULT_SEED_LABELS = [
 
 class LabelService:
     @staticmethod
-    async def list_labels(db: AsyncSession, user_id: int) -> list[Label]:
+    async def list_labels(db: AsyncSession, user_id: UUID) -> list[Label]:
         query = select(Label).where(Label.user_id == user_id).order_by(Label.name.asc())
         result = await db.execute(query)
         labels = list(result.scalars().all())
@@ -31,14 +31,14 @@ class LabelService:
         return labels
 
     @staticmethod
-    async def get_label(db: AsyncSession, label_id: UUID, user_id: int) -> Label | None:
+    async def get_label(db: AsyncSession, label_id: UUID, user_id: UUID) -> Label | None:
         result = await db.execute(
             select(Label).where(Label.id == label_id, Label.user_id == user_id)
         )
         return result.scalar_one_or_none()
 
     @staticmethod
-    async def create_label(db: AsyncSession, user_id: int, data: LabelCreate) -> Label:
+    async def create_label(db: AsyncSession, user_id: UUID, data: LabelCreate) -> Label:
         label = Label(
             user_id=user_id,
             **data.model_dump()
@@ -53,7 +53,7 @@ class LabelService:
         return label
 
     @staticmethod
-    async def update_label(db: AsyncSession, label_id: UUID, user_id: int, data: LabelUpdate) -> Label | None:
+    async def update_label(db: AsyncSession, label_id: UUID, user_id: UUID, data: LabelUpdate) -> Label | None:
         label = await LabelService.get_label(db, label_id, user_id)
         if not label:
             return None
@@ -71,7 +71,7 @@ class LabelService:
         return label
 
     @staticmethod
-    async def delete_label(db: AsyncSession, label_id: UUID, user_id: int) -> bool:
+    async def delete_label(db: AsyncSession, label_id: UUID, user_id: UUID) -> bool:
         label = await LabelService.get_label(db, label_id, user_id)
         if not label:
             return False
@@ -80,7 +80,7 @@ class LabelService:
         return True
         
     @staticmethod
-    async def attach_label(db: AsyncSession, label_id: UUID, user_id: int, data: EntityLabelAttach) -> bool:
+    async def attach_label(db: AsyncSession, label_id: UUID, user_id: UUID, data: EntityLabelAttach) -> bool:
         label = await LabelService.get_label(db, label_id, user_id)
         if not label:
             return False
@@ -106,7 +106,7 @@ class LabelService:
         return True
         
     @staticmethod
-    async def detach_label(db: AsyncSession, label_id: UUID, user_id: int, data: EntityLabelAttach) -> bool:
+    async def detach_label(db: AsyncSession, label_id: UUID, user_id: UUID, data: EntityLabelAttach) -> bool:
         label = await LabelService.get_label(db, label_id, user_id)
         if not label:
             return False

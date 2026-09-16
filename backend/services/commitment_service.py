@@ -55,7 +55,7 @@ class CommitmentService:
 
     @staticmethod
     async def list_commitments(
-        db: AsyncSession, user_id: int,
+        db: AsyncSession, user_id: UUID,
         type_: str | None = None,
         status: str | None = None,
         parent_id: UUID | None = None,
@@ -102,7 +102,7 @@ class CommitmentService:
         return commitments
 
     @staticmethod
-    async def get_commitment(db: AsyncSession, commitment_id: UUID, user_id: int) -> Commitment | None:
+    async def get_commitment(db: AsyncSession, commitment_id: UUID, user_id: UUID) -> Commitment | None:
         result = await db.execute(
             select(Commitment).where(Commitment.id == commitment_id, Commitment.user_id == user_id)
         )
@@ -112,7 +112,7 @@ class CommitmentService:
         return commitment
 
     @staticmethod
-    async def create_commitment(db: AsyncSession, user_id: int, data: CommitmentCreate) -> Commitment:
+    async def create_commitment(db: AsyncSession, user_id: UUID, data: CommitmentCreate) -> Commitment:
         parent_id = data.parent_id
         label_ids = data.label_ids or []
         payload = data.model_dump(exclude={"parent_id", "label_ids"})
@@ -144,7 +144,7 @@ class CommitmentService:
         return commitment
 
     @staticmethod
-    async def update_commitment(db: AsyncSession, commitment_id: UUID, user_id: int, data: CommitmentUpdate) -> Commitment | None:
+    async def update_commitment(db: AsyncSession, commitment_id: UUID, user_id: UUID, data: CommitmentUpdate) -> Commitment | None:
         commitment = await CommitmentService.get_commitment(db, commitment_id, user_id)
         if commitment is None:
             return None
@@ -208,7 +208,7 @@ class CommitmentService:
         return commitment
 
     @staticmethod
-    async def delete_commitment(db: AsyncSession, commitment_id: UUID, user_id: int) -> bool:
+    async def delete_commitment(db: AsyncSession, commitment_id: UUID, user_id: UUID) -> bool:
         commitment = await CommitmentService.get_commitment(db, commitment_id, user_id)
         if commitment is None:
             return False
@@ -218,7 +218,7 @@ class CommitmentService:
 
     @staticmethod
     async def reorder_commitments(
-        db: AsyncSession, items: list[tuple[UUID, int]], user_id: int,
+        db: AsyncSession, items: list[tuple[UUID, int]], user_id: UUID,
     ) -> None:
         """Batch-update sort_order for a list of commitments."""
         for item_id, sort_order in items:
