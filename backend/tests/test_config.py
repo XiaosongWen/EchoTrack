@@ -14,7 +14,7 @@ class TestSettingsDefaults:
         s = Settings(_env_file=None, _yaml_file="configs/dev.yaml")
         assert (
             s.database_url
-            == "postgresql+asyncpg://mynest:mynest@localhost:5432/mynest"
+            == "postgresql+asyncpg://echotrack:echotrack@localhost:5432/echotrack"
         )
 
     def test_redis_url_default(self, monkeypatch):
@@ -26,7 +26,7 @@ class TestSettingsDefaults:
         monkeypatch.delenv("STORAGE_PATH", raising=False)
         monkeypatch.delenv("APP_ENV", raising=False)
         s = Settings(_env_file=None, _yaml_file="configs/dev.yaml")
-        assert s.storage_path == "./mynest-storage"
+        assert s.storage_path == "./echotrack-storage"
 
     def test_supabase_defaults(self, monkeypatch):
         for key in ("SUPABASE_URL", "SUPABASE_PUBLISHABLE_KEY", "SUPABASE_SECRET_KEY",
@@ -105,4 +105,4 @@ class TestSettingsEnvOverride:
         s = Settings(_env_file=None, _yaml_file="configs/dev.yaml")
         assert s.database_url == "postgresql+asyncpg://override/db"
         assert s.redis_url == ""
-        assert s.storage_path == "./mynest-storage"
+        assert s.storage_path == "./echotrack-storage"

@@ -6,12 +6,11 @@ import { formatLocalDateShort } from "../utils/date";
 import HabitChecklist from "../components/pursuits/HabitChecklist";
 import GoalCard from "../components/pursuits/GoalCard";
 import TaskCard from "../components/pursuits/TaskCard";
-import ListCard from "../components/pursuits/ListCard";
 import CreateCommitmentModal from "../components/pursuits/CreateCommitmentModal";
 import InlineCalendar from "../components/pursuits/InlineCalendar";
 import CommitmentDetail from "./CommitmentDetail";
 
-const FILTERS = ["all", "habit", "goal", "task", "list"];
+const FILTERS = ["all", "habit", "goal", "task"];
 const PRIORITY_WEIGHT = { high: 3, medium: 2, med: 2, low: 1, none: 0 };
 
 const TAB_MAP = {
@@ -22,8 +21,6 @@ const TAB_MAP = {
   goal: "goal",
   tasks: "task",
   task: "task",
-  lists: "list",
-  list: "list",
 };
 
 export default function Commitments() {
@@ -39,7 +36,6 @@ export default function Commitments() {
       habit: "/commitments/habits",
       goal: "/commitments/goals",
       task: "/commitments/tasks",
-      list: "/commitments/lists",
     };
     navigate(routeMap[newFilter] || "/commitments");
   };
@@ -77,7 +73,6 @@ export default function Commitments() {
   const habits = filteredCommitments.filter((c) => c.type === "habit" && c.status === "active");
   const goals = filteredCommitments.filter((c) => c.type === "goal" && c.status === "active");
   const tasks = filteredCommitments.filter((c) => c.type === "task");
-  const lists = filteredCommitments.filter((c) => c.type === "list" && c.status === "active");
 
   const openCreate = (type) => {
     setCreateType(type);
@@ -211,21 +206,6 @@ export default function Commitments() {
                   }))}
                 onClick={() => handleSetFilter("task")}
               />
-              <SummaryCard
-                icon="📝"
-                label="Lists"
-                count={lists.length}
-                items={lists.slice(0, 5).map((l) => {
-                  const subItems = commitments.filter((c) => c.parent_id === l.id && (c.type === "sub-goal" || c.type === "task"));
-                  const pendingCount = subItems.filter((s) => s.status !== "completed").length;
-                  return {
-                    left: l.title,
-                    labels: l.labels || [],
-                    right: `${pendingCount} ${pendingCount === 1 ? "item" : "items"}`,
-                  };
-                })}
-                onClick={() => handleSetFilter("list")}
-              />
             </div>
           </div>
         )}
@@ -331,26 +311,6 @@ export default function Commitments() {
           </div>
         )}
 
-        {/* LISTS */}
-        {filter === "list" && (
-          <div>
-            <div className="section-header">Lists ({lists.length} Active)</div>
-            {lists.length === 0 ? (
-              <p className="text-muted text-sm">No lists yet.</p>
-            ) : (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 24 }}>
-                {lists.map((l) => (
-                  <ListCard
-                    key={l.id}
-                    list={l}
-                    onOpenDetail={(id) => setSelectedDetailId(id)}
-                    onEdit={(list) => setEditingCommitment(list)}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
       {(showCreate || editingCommitment) && (
@@ -500,8 +460,8 @@ function TaskColumn({ icon, label, tasks, todayISO, onOpenDetail, onEdit, onProm
     const sourceType = e.dataTransfer.getData("source-type");
     const sourceDueDate = e.dataTransfer.getData("source-due-date");
     
-    if (sourceType === "task-card" || sourceType === "list-item") {
-      const shouldClearParent = sourceType === "list-item";
+    if (sourceType === "task-card") {
+      const shouldClearParent = false;
       
       if (label === "Today") {
         try {
@@ -547,7 +507,7 @@ function TaskColumn({ icon, label, tasks, todayISO, onOpenDetail, onEdit, onProm
       if (dragOverTaskId !== targetTask.id) {
         setDragOverTaskId(targetTask.id);
       }
-    } else if (dm.sourceType === "task-card" || dm.sourceType === "list-item") {
+    } else if (dm.sourceType === "task-card") {
       e.preventDefault();
     }
   };

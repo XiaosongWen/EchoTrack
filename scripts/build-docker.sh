@@ -4,7 +4,7 @@ set -e
 # Default Docker Hub username / repository namespace (override via DOCKERHUB_USERNAME env var)
 DEFAULT_DOCKERHUB_USERNAME="${DOCKERHUB_USERNAME:-tomaswen}"
 
-INPUT_NAME=${1:-"mynest"}
+INPUT_NAME=${1:-"echotrack"}
 IMAGE_TAG=${2:-"latest"}
 PUSH_FLAG=${3:-"--no-push"}
 

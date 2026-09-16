@@ -124,6 +124,11 @@ export default function MonthGlance({ habits = [] }) {
 
   // Compute habit dot status for a given date
   const getHabitDotStatus = (h, dateStr) => {
+    // Never show dots for future dates — the habit hasn't happened yet
+    const now = new Date();
+    const todayISO = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    if (dateStr > todayISO) return null;
+
     const createdStr = h.commitment?.created_at || h.created_at;
     if (createdStr) {
       const cd = new Date(createdStr);
