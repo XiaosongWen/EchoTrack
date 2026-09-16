@@ -32,7 +32,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/mynest
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/echotrack
           tags: |
             type=semver,pattern={{version}}
             type=raw,value=latest

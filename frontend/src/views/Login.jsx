@@ -98,7 +98,7 @@ export default function Login() {
                 <path d="M7 17c1.5 3 8.5 3 10 0" stroke="url(#login-logo-grad)" />
               </svg>
             </div>
-            <h1 style={styles.brandTitle}>Nest</h1>
+            <h1 style={styles.brandTitle}>EchoTrack</h1>
             <p style={styles.brandSubtitle}>Welcome back. Sign in to your workspace.</p>
           </div>
 

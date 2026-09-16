@@ -3,13 +3,13 @@ import { MemoryRouter } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
 
 describe("Sidebar", () => {
-  it("renders the Nest title", () => {
+  it("renders the EchoTrack title", () => {
     render(
       <MemoryRouter>
         <Sidebar />
       </MemoryRouter>
     );
-    expect(screen.getByText("Nest")).toBeInTheDocument();
+    expect(screen.getByText("EchoTrack")).toBeInTheDocument();
   });
 
   it("renders all module navigation links", () => {

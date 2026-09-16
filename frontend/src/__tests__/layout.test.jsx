@@ -13,7 +13,7 @@ describe("Layout", () => {
     );
 
     // Sidebar title visible
-    expect(screen.getByText("Nest")).toBeInTheDocument();
+    expect(screen.getByText("EchoTrack")).toBeInTheDocument();
 
     // Children rendered
     expect(screen.getByText("Page content")).toBeInTheDocument();

@@ -46,7 +46,7 @@ export default function Sidebar() {
               fontWeight: 800,
             }}
           >
-            Nest
+            EchoTrack
           </span>
         </Link>
         <button

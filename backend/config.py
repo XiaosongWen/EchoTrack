@@ -5,9 +5,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     app_env: str = "dev"
-    database_url: str = "postgresql+asyncpg://mynest:mynest@localhost:5432/mynest"
+    database_url: str = "postgresql+asyncpg://echotrack:echotrack@localhost:5432/echotrack"
     redis_url: str = ""
-    storage_path: str = "./mynest-storage"
+    storage_path: str = "./echotrack-storage"
 
     # Supabase Settings
     supabase_url: str = ""
