@@ -40,7 +40,7 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
           EXPLICIT_ISSUE: ${{ github.event.inputs.issue }}
         run: |
-          python3 scripts/archive_exec_plan.py \
+          python3 .github/scripts/archive_exec_plan.py \
             --branch "$PR_BRANCH" \
             --title "$PR_TITLE" \
             --body "$PR_BODY" \
