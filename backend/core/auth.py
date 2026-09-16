@@ -1,10 +1,12 @@
 import uuid
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import jwt
+from jwt import PyJWKClient
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from loguru import logger
 
 from config import settings
 from database import get_db
@@ -14,16 +16,70 @@ security = HTTPBearer()
 
 DEFAULT_FALLBACK_JWT_SECRET = "mock-supabase-jwt-secret-for-test-environments-32-bytes"
 
+_jwks_client: Optional[PyJWKClient] = None
+
+
+def get_jwks_client() -> Optional[PyJWKClient]:
+    global _jwks_client
+    if _jwks_client is None and settings.supabase_url:
+        jwks_url = f"{settings.supabase_url.rstrip('/')}/auth/v1/.well-known/jwks.json"
+        _jwks_client = PyJWKClient(jwks_url, cache_jwk_set=True, lifespan=300)
+    return _jwks_client
+
 
 def verify_jwt(credentials: HTTPAuthorizationCredentials = Depends(security)) -> Dict[str, Any]:
     """
     Verify the JWT token from Supabase Auth and return the payload.
+    Supports asymmetric algorithms (ES256, RS256) via Supabase JWKS,
+    and symmetric algorithm (HS256) with SUPABASE_JWT_SECRET.
     The payload contains 'sub' (user UUID), 'email', 'role', etc.
     """
     token = credentials.credentials
+    try:
+        unverified_header = jwt.get_unverified_header(token)
+    except Exception as e:
+        logger.warning(f"Failed to parse JWT header: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token header",
+        )
+
+    alg = unverified_header.get("alg", "HS256")
+
+    # If the token is signed with an asymmetric algorithm (e.g. ES256, RS256)
+    if alg in ["ES256", "RS256", "ES384", "ES512", "RS384", "RS512"]:
+        jwks_client = get_jwks_client()
+        if jwks_client:
+            try:
+                signing_key = jwks_client.get_signing_key_from_jwt(token)
+                payload = jwt.decode(
+                    token,
+                    signing_key.key,
+                    algorithms=[alg],
+                    options={"verify_aud": False},
+                )
+                return payload
+            except jwt.ExpiredSignatureError:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Token has expired",
+                )
+            except Exception as e:
+                logger.warning(f"JWKS verification failed for alg {alg}: {e}")
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid token",
+                )
+        else:
+            logger.warning(f"No JWKS client available to verify {alg} token (SUPABASE_URL not configured)")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token",
+            )
+
+    # Symmetric verification (HS256)
     secret = settings.supabase_jwt_secret or DEFAULT_FALLBACK_JWT_SECRET
     try:
-        # Supabase uses HS256 algorithm by default with SUPABASE_JWT_SECRET
         payload = jwt.decode(
             token,
             secret,
@@ -36,7 +92,8 @@ def verify_jwt(credentials: HTTPAuthorizationCredentials = Depends(security)) ->
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token has expired",
         )
-    except (jwt.PyJWTError, Exception):
+    except (jwt.PyJWTError, Exception) as e:
+        logger.warning(f"JWT decode failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token",
