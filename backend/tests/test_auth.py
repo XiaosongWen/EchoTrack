@@ -153,3 +153,44 @@ async def test_auth_malformed_token_header():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         response = await ac.get("/api/v1/users/me", headers={"Authorization": "Bearer not-a-jwt"})
         assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_auth_concurrent_user_creation_integrity_error(db_session):
+    """When concurrent requests attempt to insert the user, IntegrityError is caught and existing user returned."""
+    from unittest.mock import MagicMock
+    from sqlalchemy.exc import IntegrityError
+
+    user_id = uuid.uuid4()
+    valid_token = create_mock_jwt(user_id, email="concurrent@example.com")
+    existing_user = User(
+        id=user_id,
+        email="concurrent@example.com",
+        username="concurrent",
+        created_at=datetime.now(timezone.utc),
+    )
+
+    # First commit fails with IntegrityError (duplicate key race)
+    db_session.commit.side_effect = [IntegrityError("duplicate key", params=None, orig=Exception("UniqueViolationError")), None]
+
+    # After rollback, second execute returns the existing user
+    mock_result_first = MagicMock()
+    mock_result_first.scalar_one_or_none.return_value = None
+
+    mock_result_second = MagicMock()
+    mock_result_second.scalar_one_or_none.return_value = existing_user
+
+    db_session.execute.side_effect = [mock_result_first, mock_result_second]
+
+    app.dependency_overrides[get_db] = lambda: db_session
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            response = await ac.get("/api/v1/users/me", headers={"Authorization": f"Bearer {valid_token}"})
+            assert response.status_code == 200
+            data = response.json()["data"]
+            assert data["id"] == str(user_id)
+            assert db_session.rollback.called
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        db_session.commit.side_effect = None
+        db_session.execute.side_effect = None

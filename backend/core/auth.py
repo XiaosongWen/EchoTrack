@@ -5,6 +5,7 @@ from jwt import PyJWKClient
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
 
@@ -136,13 +137,22 @@ async def get_current_user(
         if not username and email:
             username = email.split("@")[0]
 
-        user = User(
-            id=user_uuid,
-            email=email,
-            username=username,
-        )
-        db.add(user)
-        await db.commit()
-        await db.refresh(user)
+        try:
+            user = User(
+                id=user_uuid,
+                email=email,
+                username=username,
+            )
+            db.add(user)
+            await db.commit()
+            await db.refresh(user)
+        except IntegrityError:
+            # Handle race condition where another concurrent request already created the user
+            await db.rollback()
+            result = await db.execute(select(User).where(User.id == user_uuid))
+            user = result.scalar_one_or_none()
+            if not user and email:
+                result = await db.execute(select(User).where(User.email == email))
+                user = result.scalar_one_or_none()
 
     return user
