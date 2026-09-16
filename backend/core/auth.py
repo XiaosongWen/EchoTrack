@@ -45,6 +45,7 @@ def verify_jwt(credentials: HTTPAuthorizationCredentials = Depends(security)) ->
         )
 
     alg = unverified_header.get("alg", "HS256")
+    logger.info(f"verify_jwt: token received with alg={alg}, kid={unverified_header.get('kid')}")
 
     # If the token is signed with an asymmetric algorithm (e.g. ES256, RS256)
     if alg in ["ES256", "RS256", "ES384", "ES512", "RS384", "RS512"]:
@@ -58,14 +59,16 @@ def verify_jwt(credentials: HTTPAuthorizationCredentials = Depends(security)) ->
                     algorithms=[alg],
                     options={"verify_aud": False},
                 )
+                logger.info(f"verify_jwt: successfully verified {alg} token for sub={payload.get('sub')}")
                 return payload
             except jwt.ExpiredSignatureError:
+                logger.warning("verify_jwt: token has expired")
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Token has expired",
                 )
             except Exception as e:
-                logger.warning(f"JWKS verification failed for alg {alg}: {e}")
+                logger.warning(f"verify_jwt: JWKS verification failed for alg {alg}: {e}")
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Invalid token",

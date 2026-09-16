@@ -18,6 +18,8 @@ client.interceptors.request.use(async (config) => {
 });
 
 // Handle expired tokens and 401 Unauthorized seamlessly
+let refreshPromise = null;
+
 client.interceptors.response.use(
   (response) => response,
   async (error) => {
@@ -25,7 +27,12 @@ client.interceptors.response.use(
     if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
       originalRequest._retry = true;
       try {
-        const { data: { session }, error: refreshError } = await supabase.auth.refreshSession();
+        if (!refreshPromise) {
+          refreshPromise = supabase.auth.refreshSession().finally(() => {
+            refreshPromise = null;
+          });
+        }
+        const { data: { session }, error: refreshError } = await refreshPromise;
         if (session?.access_token && !refreshError) {
           originalRequest.headers.Authorization = `Bearer ${session.access_token}`;
           return client(originalRequest);
@@ -33,6 +40,10 @@ client.interceptors.response.use(
       } catch (refreshErr) {
         console.error("Session refresh failed:", refreshErr);
       }
+      try {
+        const { useAuthStore } = await import("../stores/authStore");
+        useAuthStore.getState().signOut();
+      } catch (_) {}
       if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
         window.location.href = "/login";
       }
