@@ -1,11 +1,16 @@
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.auth import get_current_user
 from main import app
+from models.user import User
+
+TEST_USER_ID = UUID("00000000-0000-0000-0000-000000000001")
 
 
 @pytest.fixture
@@ -14,12 +19,25 @@ def anyio_backend():
 
 
 @pytest.fixture
-async def client():
-    """Async HTTP client against the FastAPI app (no DB dependency)."""
+def test_user():
+    """Stub User with UUID for tests."""
+    return User(
+        id=TEST_USER_ID,
+        username="test_user",
+        email="test@example.com",
+        created_at=datetime.now(timezone.utc),
+    )
+
+
+@pytest.fixture
+async def client(test_user):
+    """Async HTTP client against the FastAPI app, authenticating as test_user by default."""
+    app.dependency_overrides[get_current_user] = lambda: test_user
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as ac:
         yield ac
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 @pytest.fixture
@@ -39,10 +57,8 @@ def db_session():
         if hasattr(obj, "id") and obj.id is None:
             obj.id = uuid4()
         if hasattr(obj, "created_at") and obj.created_at is None:
-            from datetime import datetime, timezone
             obj.created_at = datetime.now(timezone.utc)
         if hasattr(obj, "updated_at") and obj.updated_at is None:
-            from datetime import datetime, timezone
             obj.updated_at = datetime.now(timezone.utc)
     session.refresh = AsyncMock(side_effect=_refresh_side_effect)
 
@@ -53,11 +69,3 @@ def db_session():
     session.execute = AsyncMock(return_value=result)
 
     return session
-
-
-@pytest.fixture
-def test_user():
-    """Stub user with id=1 for service-level tests."""
-    user = MagicMock()
-    user.id = 1
-    return user

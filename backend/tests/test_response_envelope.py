@@ -26,7 +26,7 @@ def _new_commitment(**kwargs):
     """Build a real Commitment ORM object with the given overrides."""
     from models.commitment import Commitment
     defaults = dict(
-        id=uuid4(), user_id=1, type="habit", title="Test",
+        id=uuid4(), user_id=uuid4(), type="habit", title="Test",
         description=None, status="active", priority="none",
         config=None, due_date=None, sort_order=0,
         created_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
@@ -103,7 +103,7 @@ def mock_db():
 
     app.dependency_overrides[get_db] = lambda: session
     yield session
-    app.dependency_overrides.clear()
+    app.dependency_overrides.pop(get_db, None)
 
 
 @pytest.fixture
@@ -111,7 +111,7 @@ def mock_user_db():
     """Mock session that returns a default User for /users/me."""
     session = AsyncMock()
     default_user = User(
-        id=1, username="default", email=None,
+        id=uuid4(), username="default", email=None,
         created_at=datetime.now(timezone.utc),
     )
 
@@ -123,7 +123,7 @@ def mock_user_db():
     session.execute = AsyncMock(side_effect=execute_side_effect)
     app.dependency_overrides[get_db] = lambda: session
     yield session
-    app.dependency_overrides.clear()
+    app.dependency_overrides.pop(get_db, None)
 
 
 # ---------------------------------------------------------------------------
@@ -143,7 +143,8 @@ class TestSingleResponseEnvelope:
         resp = await client.get("/api/v1/users/me")
         body = resp.json()
         _assert_single_envelope(body)
-        assert body["data"]["id"] == 1
+        from uuid import UUID
+        assert UUID(body["data"]["id"])
 
     @pytest.mark.asyncio
     async def test_get_commitment_envelope(self, client, mock_db):

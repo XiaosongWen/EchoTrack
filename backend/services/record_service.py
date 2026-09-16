@@ -123,7 +123,7 @@ class RecordService:
 
     @staticmethod
     async def get_heatmap(
-        db: AsyncSession, user_id: int, date_from: date, date_to: date,
+        db: AsyncSession, user_id: UUID, date_from: date, date_to: date,
     ) -> list[HeatmapEntry]:
         """Count done records per day for the user's commitments."""
         rows = await db.execute(

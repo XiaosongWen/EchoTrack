@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { vi } from "vitest";
 import App from "../App";
+import { useAuthStore } from "../stores/authStore";
 
 vi.mock("../stores/usePursuitsStore", () => ({
   default: (selector) => {
@@ -23,7 +24,27 @@ vi.mock("../stores/usePursuitsStore", () => ({
 }));
 
 describe("App routing", () => {
-  it("renders dashboard on the root route", () => {
+  beforeEach(() => {
+    useAuthStore.setState({
+      user: { id: "test-user-id", email: "test@example.com" },
+      session: { access_token: "mock-token" },
+      loading: false,
+      error: null,
+      init: vi.fn(),
+    });
+  });
+
+  it("renders login route when unauthenticated", () => {
+    useAuthStore.setState({ user: null, session: null, loading: false });
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <App />
+      </MemoryRouter>
+    );
+    expect(screen.getByRole("button", { name: "Sign In" })).toBeInTheDocument();
+  });
+
+  it("renders dashboard on the root route when authenticated", () => {
     render(
       <MemoryRouter initialEntries={["/"]}>
         <App />
