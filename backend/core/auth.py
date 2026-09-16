@@ -12,6 +12,8 @@ from models.user import User
 
 security = HTTPBearer()
 
+DEFAULT_FALLBACK_JWT_SECRET = "mock-supabase-jwt-secret-for-test-environments-32-bytes"
+
 
 def verify_jwt(credentials: HTTPAuthorizationCredentials = Depends(security)) -> Dict[str, Any]:
     """
@@ -19,11 +21,12 @@ def verify_jwt(credentials: HTTPAuthorizationCredentials = Depends(security)) ->
     The payload contains 'sub' (user UUID), 'email', 'role', etc.
     """
     token = credentials.credentials
+    secret = settings.supabase_jwt_secret or DEFAULT_FALLBACK_JWT_SECRET
     try:
         # Supabase uses HS256 algorithm by default with SUPABASE_JWT_SECRET
         payload = jwt.decode(
             token,
-            settings.supabase_jwt_secret,
+            secret,
             algorithms=["HS256"],
             options={"verify_aud": False},
         )
@@ -33,7 +36,7 @@ def verify_jwt(credentials: HTTPAuthorizationCredentials = Depends(security)) ->
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token has expired",
         )
-    except jwt.InvalidTokenError:
+    except (jwt.PyJWTError, Exception):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token",
