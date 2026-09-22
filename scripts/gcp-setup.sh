@@ -64,6 +64,18 @@ gcloud iam service-accounts create "${SERVICE_ACCOUNT_NAME}" \
   --project="${GCP_PROJECT_ID}" \
   2>/dev/null || echo "  Service account already exists, skipping."
 
+# Wait for the SA to propagate before adding IAM bindings.
+# GCP takes a few seconds to make a newly created SA available globally.
+echo "  Waiting for service account to propagate..."
+for i in $(seq 1 10); do
+  if gcloud iam service-accounts describe "${SA_EMAIL}" --project="${GCP_PROJECT_ID}" &>/dev/null; then
+    echo "  Service account is ready."
+    break
+  fi
+  echo "  Attempt ${i}/10 — not ready yet, retrying in 3 s..."
+  sleep 3
+done
+
 # Grant secret access
 gcloud projects add-iam-policy-binding "${GCP_PROJECT_ID}" \
   --member="serviceAccount:${SA_EMAIL}" \
