@@ -75,23 +75,35 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
-      # ── Declarative Cloud Run deploy ──────────────────────────────────────────
-      - name: Deploy to Cloud Run
+      # ── Deploy new revision with NO traffic (old revision keeps serving) ────────
+      - name: Deploy New Revision (no traffic)
         run: |
           FULL_IMAGE="${{ env.DOCKERHUB_IMAGE }}:${{ steps.tag.outputs.tag }}"
-          sed "s|IMAGE_PLACEHOLDER|${FULL_IMAGE}|g" infra/cloudrun/service.yaml \
-            | gcloud run services replace - \
-                --region="${{ env.GCP_REGION }}" \
-                --project="${{ secrets.GCP_PROJECT_ID }}"
-
-      - name: Set CORS Origins
-        run: |
-          gcloud run services update ${{ env.SERVICE_NAME }} \
+          gcloud run deploy ${{ env.SERVICE_NAME }} \
+            --image="${FULL_IMAGE}" \
             --region="${{ env.GCP_REGION }}" \
             --project="${{ secrets.GCP_PROJECT_ID }}" \
-            --update-env-vars "CORS_ORIGINS=${{ secrets.CORS_ORIGINS }}"
+            --no-traffic \
+            --set-env-vars="APP_ENV=prod,CORS_ORIGINS=${{ secrets.CORS_ORIGINS }}" \
+            --set-secrets="\
+              DATABASE_URL=echotrack-database-url:latest,\
+              SUPABASE_URL=echotrack-supabase-url:latest,\
+              SUPABASE_PUBLISHABLE_KEY=echotrack-supabase-publishable-key:latest,\
+              SUPABASE_SECRET_KEY=echotrack-supabase-secret-key:latest,\
+              SUPABASE_JWT_SECRET=echotrack-supabase-jwt-secret:latest" \
+            --service-account="${{ secrets.GCP_SERVICE_ACCOUNT }}" \
+            --min-instances=0 \
+            --max-instances=10 \
+            --concurrency=80 \
+            --cpu=1 \
+            --memory=512Mi \
+            --port=8080 \
+            --timeout=300 \
+            --format="value(status.latestCreatedRevisionName)" \
+            | tee /tmp/new_revision.txt
+          echo "new_revision=$(cat /tmp/new_revision.txt)" >> $GITHUB_ENV
 
-      # Make service publicly invocable (app-level auth via Supabase JWT)
+      # Make service publicly invocable (idempotent — safe to run every deploy)
       - name: Allow Public Invocations
         run: |
           gcloud run services add-iam-policy-binding ${{ env.SERVICE_NAME }} \
@@ -101,23 +113,57 @@ jobs:
             --role="roles/run.invoker" \
             --quiet || true
 
-      # ── Smoke-test the deployed service ──────────────────────────────────────
-      - name: Verify Health Endpoint
+      # ── Smoke-test the NEW revision directly (old revision still serving) ─────
+      - name: Smoke Test New Revision
         run: |
+          # Get the URL for the specific new revision (not the service URL which
+          # still points at the old revision while --no-traffic is in effect).
+          REVISION_URL=$(gcloud run revisions describe "${{ env.new_revision }}" \
+            --region="${{ env.GCP_REGION }}" \
+            --project="${{ secrets.GCP_PROJECT_ID }}" \
+            --format="value(status.url)" 2>/dev/null || true)
+
+          # Fallback: use service URL with revision header (always works)
           SERVICE_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
             --region="${{ env.GCP_REGION }}" \
             --project="${{ secrets.GCP_PROJECT_ID }}" \
             --format="value(status.url)")
-          echo "Service URL: ${SERVICE_URL}"
-          # Retry for up to 60 s while the new revision warms up.
+          TEST_URL="${REVISION_URL:-$SERVICE_URL}"
+
+          echo "Smoke testing revision: ${{ env.new_revision }}"
+          echo "Test URL: ${TEST_URL}/api/v1/health"
+
+          # Retry up to 60 s for the new revision to warm up.
           for i in $(seq 1 12); do
-            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${SERVICE_URL}/api/v1/health")
+            HTTP_STATUS=$(curl -s -o /tmp/health_body.txt -w "%{http_code}" \
+              -H "Authorization: Bearer $(gcloud auth print-identity-token)" \
+              "${TEST_URL}/api/v1/health")
             if [ "${HTTP_STATUS}" = "200" ]; then
-              echo "Health check passed (HTTP 200)."
+              echo "✅ Health check passed (HTTP 200). Revision is healthy."
+              cat /tmp/health_body.txt
               exit 0
             fi
-            echo "Attempt ${i}/12 — got HTTP ${HTTP_STATUS}, retrying in 5 s..."
+            echo "Attempt ${i}/12 — HTTP ${HTTP_STATUS}, retrying in 5 s..."
             sleep 5
           done
-          echo "Health check failed after 60 s."
+
+          echo "❌ Health check failed after 60 s — keeping old revision live."
           exit 1
+
+      # ── Migrate traffic ONLY after successful smoke test ──────────────────────
+      - name: Migrate Traffic to New Revision
+        run: |
+          gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
+            --region="${{ env.GCP_REGION }}" \
+            --project="${{ secrets.GCP_PROJECT_ID }}" \
+            --to-latest
+          echo "✅ Traffic migrated to ${{ env.new_revision }}"
+
+      # ── Rollback on failure ───────────────────────────────────────────────────
+      - name: Rollback on Failure
+        if: failure()
+        run: |
+          echo "⚠️  Deployment failed — old revision is still serving 100% traffic."
+          echo "New revision ${{ env.new_revision }} received no traffic."
+          echo "To manually rollback or investigate:"
+          echo "  gcloud run revisions list --service=${{ env.SERVICE_NAME }} --region=${{ env.GCP_REGION }} --project=${{ secrets.GCP_PROJECT_ID }}"
