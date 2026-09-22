@@ -44,4 +44,5 @@ echo "Running Alembic migrations..."
 alembic upgrade head
 
 echo "Starting FastAPI..."
-exec uvicorn main:app --host 0.0.0.0 --port 8000
+# Cloud Run injects $PORT; fall back to 8000 for local / Docker Compose usage.
+exec uvicorn main:app --host 0.0.0.0 --port "${PORT:-8000}"
