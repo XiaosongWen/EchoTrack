@@ -10,7 +10,7 @@
 Sidebar (Collapsible Drawer with toggle button)
 ├── Mission Control
 │   ├── 📅 Dashboard          ← 日记式每日视图（打卡 + 任务 + 进度 + planner 记录）
-│   ├── 🎯 Pursuits          ← 统一浏览页（filter 切换 All / Habits / Goals / Tasks / Lists）
+│   ├── 🎯 Pursuits          ← 统一浏览页（filter 切换 All / Habits / Goals / Tasks）
 │   └── 🧠 Knowledge
 ├── Media
 │   ├── 📷 Photos
@@ -209,7 +209,7 @@ July 2026                                  [Today] [<] [>]
 
 ```
 ┌─ Toolbar ──────────────────────────────────────────┐
-│ [All] [Habits] [Goals] [Tasks] [Lists]   [🔍] [+ ▾]│
+│ [All] [Habits] [Goals] [Tasks]   [🔍] [+ ▾]        │
 ├─ Content (varies by filter) ──────────────────────┤
 │                                                     │
 └─────────────────────────────────────────────────────┘
@@ -223,7 +223,6 @@ July 2026                                  [Today] [<] [>]
 ├── Habit
 ├── Goal
 ├── Task
-├── List
 └── Note
 ```
 
@@ -256,12 +255,8 @@ Lose 20 lbs        ███░░░░░░░  15%   Sep 1
 ── Tasks (5 active) ──────────────────────────────
 ☐  Design mobile UI        In Progress · High
 ☐  Buy groceries           Todo · Low
+☐  Grocery Shopping  ✓2/5  [checklist]  ← checklist-mode task shown with item count
 → View all 5 tasks
-
-── Lists (2 active) ──────────────────────────────
-🛒 Grocery shopping        3/5 items
-📦 Moving checklist        0/10 items
-→ View all 2 lists
 ```
 
 **States:**
@@ -275,7 +270,7 @@ Lose 20 lbs        ███░░░░░░░  15%   Sep 1
 
 ### 3.3 Habits View
 
-Selected filter: `[All] [Habits] [Goals] [Tasks] [Lists]`
+Selected filter: `[All] [Habits] [Goals] [Tasks]`
 
 ```
   ┌─ Calendar Heatmap ──────────────────────────┐
@@ -350,25 +345,26 @@ Selected filter: `[All] [Habits] [Goals] [Tasks] [Lists]`
 - **Calendar view:** Month grid showing tasks on their due dates
 - Status + priority filters are additional filters shown only when Tasks filter is active
 
-### 3.6 Lists View
+**Checklist-mode tasks** (tasks with ordered checklist records) render inline-expanded in the List view:
 
 ```
-  🛒 Grocery Shopping        3/5  ██████░░░░
+  List view:
+  ☐  Design mobile UI        In Progress · High          [Edit]
+  ☐  Grocery Shopping        Todo        2/5 ██░░░░░░░░  [Edit]
      ☑ Milk
+     ☑ Yogurt
      ☐ Eggs
      ☐ Bread
-     ☑ Yogurt
      ☐ Fruit
      [+ Add item...]
-
-  📦 Moving Checklist        0/10 ░░░░░░░░░░
-     [+ Add item...]
+  ✓  Setup Docker             Done        · Low           [Edit]
 ```
 
-- Each item is a record with `content` + `status`
-- Click ∘ → ✓ immediately
-- Bottom input to add new item
-- Drag handle on left for reorder
+- A task automatically enters checklist mode when it has any records with `sort_order` set
+- Checklist items are toggled inline (same optimistic POST as habit check-in)
+- Drag handle on the left of each item for reorder → `PUT /pursuits/records/reorder`
+- Creating a new task with "+ Add checklist item" input auto-sets `sort_order`
+- In Board view, checklist-mode tasks show a compact `✓2/5` progress badge on the card
 
 ---
 
@@ -414,8 +410,7 @@ Trigger: `+ New` in Pursuits page toolbar.
 |---|---|
 | Habit | Frequency (Daily / Weekly X times / Custom), Color, Target count/day |
 | Goal | Progress type (Checklist / Percentage target → target value + unit), Deadline (optional date picker) |
-| Task | Priority, Deadline (optional) |
-| List | (none — enters edit mode immediately after creation) |
+| Task | Priority, Deadline (optional), optional "Add checklist items" toggle (enters checklist mode) |
 | Note | (none — opens note editor after creation) |
 
 ### 4.2 Edit Commitment vs Edit Record Modals
@@ -423,11 +418,11 @@ Trigger: `+ New` in Pursuits page toolbar.
 To respect the backend distinction between Commitments and Records, the UI implements highly context-aware editing mechanics:
 
 **Edit Commitment:**
-- **Trigger:** Clicking "Edit" on a Habit, Goal title, Task, or List title.
+- **Trigger:** Clicking "Edit" on a Habit, Goal title, or Task title.
 - **Behavior:** Reuses the Create Commitment modal but changes the title to "Edit Commitment" and the button to "Save Changes". It smartly detects the item's current type (e.g., Habit) and **hides the type selection buttons**, locking the commitment type to prevent data corruption while exposing its configurable properties.
 
 **Edit Record:**
-- **Trigger:** Clicking "Edit" on a List item (e.g., "Eggs") or a Goal log entry.
+- **Trigger:** Clicking "Edit" on a checklist item (e.g., "Eggs" inside a task) or a Goal log entry.
 - **Behavior:** Bypasses the complex Commitment modal entirely. Pops up a streamlined "Edit Record" modal containing only "Record Content", an optional "Comments / Notes" textarea, and a Date field.
 
 **Validation:**
@@ -497,8 +492,7 @@ Trigger: click any commitment card/title anywhere in the app.
 |---|---|
 | Habit | Calendar heatmap, stats card (streak/rate), records timeline, edit |
 | Goal | Progress bar, sub-goals, records timeline, linked habits, edit |
-| Task | Status + priority, change log, linked records, edit |
-| List | All items + checkboxes, progress bar, add item |
+| Task | Status + priority, change log, linked records, edit; if checklist-mode: all items + checkboxes, progress bar, add item |
 | Note | Full note editor (markdown), save button |
 
 **Navigation within panel:**
@@ -548,7 +542,6 @@ Trigger: Dashboard Morning Routine or Habits view.
 | Pursuits — Habits | "No habits — start building routines" | [Create Habit] |
 | Pursuits — Goals | "No goals — set something to work toward" | [Create Goal] |
 | Pursuits — Tasks | "No tasks yet" | [Create Task] |
-| Pursuits — Lists | "No lists" | [Create List] |
 
 ### 5.3 Loading States
 

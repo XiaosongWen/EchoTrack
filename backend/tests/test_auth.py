@@ -69,3 +69,128 @@ async def test_auth_valid_token_auto_sync_user(db_session):
             assert db_session.commit.called
     finally:
         app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.mark.asyncio
+async def test_auth_es256_token_via_jwks(monkeypatch, db_session):
+    """Verify that ES256 tokens signed with EC key are verified via JWKS client."""
+    from cryptography.hazmat.primitives.asymmetric import ec
+    import core.auth as auth_mod
+
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    public_key = private_key.public_key()
+    user_id = uuid.uuid4()
+
+    exp = datetime.now(timezone.utc) + timedelta(hours=1)
+    payload = {
+        "sub": str(user_id),
+        "email": "es256user@example.com",
+        "role": "authenticated",
+        "exp": exp.timestamp(),
+        "user_metadata": {"name": "ES256 User"},
+    }
+    es256_token = jwt.encode(payload, private_key, algorithm="ES256", headers={"kid": "test-kid"})
+
+    class MockSigningKey:
+        def __init__(self, key):
+            self.key = key
+
+    class MockJWKSClient:
+        def get_signing_key_from_jwt(self, token):
+            return MockSigningKey(public_key)
+
+    monkeypatch.setattr(auth_mod, "get_jwks_client", lambda: MockJWKSClient())
+
+    app.dependency_overrides[get_db] = lambda: db_session
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            response = await ac.get("/api/v1/users/me", headers={"Authorization": f"Bearer {es256_token}"})
+            assert response.status_code == 200
+            data = response.json()["data"]
+            assert data["id"] == str(user_id)
+            assert data["email"] == "es256user@example.com"
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.mark.asyncio
+async def test_auth_es256_expired_token(monkeypatch):
+    """Expired ES256 token returns 401."""
+    from cryptography.hazmat.primitives.asymmetric import ec
+    import core.auth as auth_mod
+
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    public_key = private_key.public_key()
+    user_id = uuid.uuid4()
+
+    exp = datetime.now(timezone.utc) - timedelta(minutes=5)
+    payload = {
+        "sub": str(user_id),
+        "email": "expired@example.com",
+        "exp": exp.timestamp(),
+    }
+    expired_token = jwt.encode(payload, private_key, algorithm="ES256", headers={"kid": "test-kid"})
+
+    class MockSigningKey:
+        def __init__(self, key):
+            self.key = key
+
+    class MockJWKSClient:
+        def get_signing_key_from_jwt(self, token):
+            return MockSigningKey(public_key)
+
+    monkeypatch.setattr(auth_mod, "get_jwks_client", lambda: MockJWKSClient())
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.get("/api/v1/users/me", headers={"Authorization": f"Bearer {expired_token}"})
+        assert response.status_code == 401
+        assert response.json()["msg"] == "Token has expired"
+
+
+@pytest.mark.asyncio
+async def test_auth_malformed_token_header():
+    """Completely malformed token string returns 401."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.get("/api/v1/users/me", headers={"Authorization": "Bearer not-a-jwt"})
+        assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_auth_concurrent_user_creation_integrity_error(db_session):
+    """When concurrent requests attempt to insert the user, IntegrityError is caught and existing user returned."""
+    from unittest.mock import MagicMock
+    from sqlalchemy.exc import IntegrityError
+
+    user_id = uuid.uuid4()
+    valid_token = create_mock_jwt(user_id, email="concurrent@example.com")
+    existing_user = User(
+        id=user_id,
+        email="concurrent@example.com",
+        username="concurrent",
+        created_at=datetime.now(timezone.utc),
+    )
+
+    # First commit fails with IntegrityError (duplicate key race)
+    db_session.commit.side_effect = [IntegrityError("duplicate key", params=None, orig=Exception("UniqueViolationError")), None]
+
+    # After rollback, second execute returns the existing user
+    mock_result_first = MagicMock()
+    mock_result_first.scalar_one_or_none.return_value = None
+
+    mock_result_second = MagicMock()
+    mock_result_second.scalar_one_or_none.return_value = existing_user
+
+    db_session.execute.side_effect = [mock_result_first, mock_result_second]
+
+    app.dependency_overrides[get_db] = lambda: db_session
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            response = await ac.get("/api/v1/users/me", headers={"Authorization": f"Bearer {valid_token}"})
+            assert response.status_code == 200
+            data = response.json()["data"]
+            assert data["id"] == str(user_id)
+            assert db_session.rollback.called
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        db_session.commit.side_effect = None
+        db_session.execute.side_effect = None
