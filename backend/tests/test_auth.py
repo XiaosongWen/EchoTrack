@@ -2,19 +2,29 @@ from datetime import datetime, timezone, timedelta
 import uuid
 import jwt
 import pytest
+from cryptography.hazmat.primitives.asymmetric import ec
 from httpx import ASGITransport, AsyncClient
 
-from config import settings
 from database import get_db
 from main import app
 from models.user import User
+import core.auth as auth_mod
 
-# Fixed secret used only for HS256 test token minting — never used in production.
-_TEST_JWT_SECRET = "test-only-jwt-secret-32-bytes-xx"
+# EC key pair shared across all tests in this module.
+# create_mock_jwt signs with _PRIVATE_KEY; mock_jwks makes verify_jwt resolve it.
+_PRIVATE_KEY = ec.generate_private_key(ec.SECP256R1())
+_PUBLIC_KEY = _PRIVATE_KEY.public_key()
+_WRONG_PRIVATE_KEY = ec.generate_private_key(ec.SECP256R1())  # different key → invalid sig
 
 
-def create_mock_jwt(user_id: uuid.UUID, email: str = "test@example.com", expired: bool = False, secret: str = None) -> str:
-    secret = secret or _TEST_JWT_SECRET
+def create_mock_jwt(
+    user_id: uuid.UUID,
+    email: str = "test@example.com",
+    expired: bool = False,
+    private_key=None,
+) -> str:
+    """Mint an ES256 JWT signed with the test EC private key (or a supplied one)."""
+    key = private_key or _PRIVATE_KEY
     exp = datetime.now(timezone.utc) + (timedelta(seconds=-60) if expired else timedelta(hours=1))
     payload = {
         "sub": str(user_id),
@@ -23,7 +33,26 @@ def create_mock_jwt(user_id: uuid.UUID, email: str = "test@example.com", expired
         "exp": exp.timestamp(),
         "user_metadata": {"name": "Test User"},
     }
-    return jwt.encode(payload, secret, algorithm="HS256")
+    return jwt.encode(payload, key, algorithm="ES256", headers={"kid": "test-kid"})
+
+
+class _MockSigningKey:
+    def __init__(self, key):
+        self.key = key
+
+
+class _MockJWKSClient:
+    """Returns the shared test public key for any token."""
+    def get_signing_key_from_jwt(self, token):
+        return _MockSigningKey(_PUBLIC_KEY)
+
+
+@pytest.fixture
+def mock_jwks(monkeypatch):
+    """Patch get_jwks_client so verify_jwt resolves ES256 tokens without a real Supabase URL."""
+    monkeypatch.setattr(auth_mod, "get_jwks_client", lambda: _MockJWKSClient())
+
+
 
 
 @pytest.mark.asyncio
@@ -35,16 +64,16 @@ async def test_auth_missing_token():
 
 
 @pytest.mark.asyncio
-async def test_auth_invalid_token():
-    """Request with invalid signature should return 401."""
-    bad_token = create_mock_jwt(uuid.uuid4(), secret="wrong-secret-key-1234567890123456")
+async def test_auth_invalid_token(mock_jwks):
+    """Token signed with a different EC key should return 401."""
+    bad_token = create_mock_jwt(uuid.uuid4(), private_key=_WRONG_PRIVATE_KEY)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         response = await ac.get("/api/v1/users/me", headers={"Authorization": f"Bearer {bad_token}"})
         assert response.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_auth_expired_token():
+async def test_auth_expired_token(mock_jwks):
     """Request with expired token should return 401."""
     expired_token = create_mock_jwt(uuid.uuid4(), expired=True)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
@@ -53,7 +82,7 @@ async def test_auth_expired_token():
 
 
 @pytest.mark.asyncio
-async def test_auth_valid_token_auto_sync_user(db_session):
+async def test_auth_valid_token_auto_sync_user(mock_jwks, db_session):
     """Request with valid token for a new user should auto-provision the user."""
     user_id = uuid.uuid4()
     valid_token = create_mock_jwt(user_id, email="newuser@example.com")
@@ -74,39 +103,15 @@ async def test_auth_valid_token_auto_sync_user(db_session):
 
 
 @pytest.mark.asyncio
-async def test_auth_es256_token_via_jwks(monkeypatch, db_session):
-    """Verify that ES256 tokens signed with EC key are verified via JWKS client."""
-    from cryptography.hazmat.primitives.asymmetric import ec
-    import core.auth as auth_mod
-
-    private_key = ec.generate_private_key(ec.SECP256R1())
-    public_key = private_key.public_key()
+async def test_auth_es256_token_via_jwks(mock_jwks, db_session):
+    """ES256 tokens signed with EC key are verified via JWKS client."""
     user_id = uuid.uuid4()
-
-    exp = datetime.now(timezone.utc) + timedelta(hours=1)
-    payload = {
-        "sub": str(user_id),
-        "email": "es256user@example.com",
-        "role": "authenticated",
-        "exp": exp.timestamp(),
-        "user_metadata": {"name": "ES256 User"},
-    }
-    es256_token = jwt.encode(payload, private_key, algorithm="ES256", headers={"kid": "test-kid"})
-
-    class MockSigningKey:
-        def __init__(self, key):
-            self.key = key
-
-    class MockJWKSClient:
-        def get_signing_key_from_jwt(self, token):
-            return MockSigningKey(public_key)
-
-    monkeypatch.setattr(auth_mod, "get_jwks_client", lambda: MockJWKSClient())
+    token = create_mock_jwt(user_id, email="es256user@example.com")
 
     app.dependency_overrides[get_db] = lambda: db_session
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-            response = await ac.get("/api/v1/users/me", headers={"Authorization": f"Bearer {es256_token}"})
+            response = await ac.get("/api/v1/users/me", headers={"Authorization": f"Bearer {token}"})
             assert response.status_code == 200
             data = response.json()["data"]
             assert data["id"] == str(user_id)
@@ -116,33 +121,9 @@ async def test_auth_es256_token_via_jwks(monkeypatch, db_session):
 
 
 @pytest.mark.asyncio
-async def test_auth_es256_expired_token(monkeypatch):
+async def test_auth_es256_expired_token(mock_jwks):
     """Expired ES256 token returns 401."""
-    from cryptography.hazmat.primitives.asymmetric import ec
-    import core.auth as auth_mod
-
-    private_key = ec.generate_private_key(ec.SECP256R1())
-    public_key = private_key.public_key()
-    user_id = uuid.uuid4()
-
-    exp = datetime.now(timezone.utc) - timedelta(minutes=5)
-    payload = {
-        "sub": str(user_id),
-        "email": "expired@example.com",
-        "exp": exp.timestamp(),
-    }
-    expired_token = jwt.encode(payload, private_key, algorithm="ES256", headers={"kid": "test-kid"})
-
-    class MockSigningKey:
-        def __init__(self, key):
-            self.key = key
-
-    class MockJWKSClient:
-        def get_signing_key_from_jwt(self, token):
-            return MockSigningKey(public_key)
-
-    monkeypatch.setattr(auth_mod, "get_jwks_client", lambda: MockJWKSClient())
-
+    expired_token = create_mock_jwt(uuid.uuid4(), email="expired@example.com", expired=True)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         response = await ac.get("/api/v1/users/me", headers={"Authorization": f"Bearer {expired_token}"})
         assert response.status_code == 401
@@ -158,7 +139,7 @@ async def test_auth_malformed_token_header():
 
 
 @pytest.mark.asyncio
-async def test_auth_concurrent_user_creation_integrity_error(db_session):
+async def test_auth_concurrent_user_creation_integrity_error(mock_jwks, db_session):
     """When concurrent requests attempt to insert the user, IntegrityError is caught and existing user returned."""
     from unittest.mock import MagicMock
     from sqlalchemy.exc import IntegrityError
