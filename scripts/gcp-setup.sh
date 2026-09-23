@@ -43,8 +43,7 @@ for SECRET_NAME in \
   echotrack-database-url \
   echotrack-supabase-url \
   echotrack-supabase-publishable-key \
-  echotrack-supabase-secret-key \
-  echotrack-supabase-jwt-secret; do
+  echotrack-supabase-secret-key; do
   gcloud secrets create "${SECRET_NAME}" \
     --replication-policy="automatic" \
     --project="${GCP_PROJECT_ID}" \

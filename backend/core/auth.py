@@ -15,8 +15,6 @@ from models.user import User
 
 security = HTTPBearer()
 
-DEFAULT_FALLBACK_JWT_SECRET = "mock-supabase-jwt-secret-for-test-environments-32-bytes"
-
 _jwks_client: Optional[PyJWKClient] = None
 
 
@@ -31,8 +29,7 @@ def get_jwks_client() -> Optional[PyJWKClient]:
 def verify_jwt(credentials: HTTPAuthorizationCredentials = Depends(security)) -> Dict[str, Any]:
     """
     Verify the JWT token from Supabase Auth and return the payload.
-    Supports asymmetric algorithms (ES256, RS256) via Supabase JWKS,
-    and symmetric algorithm (HS256) with SUPABASE_JWT_SECRET.
+    Supports asymmetric algorithms (ES256, RS256) via Supabase JWKS endpoint.
     The payload contains 'sub' (user UUID), 'email', 'role', etc.
     """
     token = credentials.credentials
@@ -45,59 +42,42 @@ def verify_jwt(credentials: HTTPAuthorizationCredentials = Depends(security)) ->
             detail="Invalid token header",
         )
 
-    alg = unverified_header.get("alg", "HS256")
+    alg = unverified_header.get("alg", "")
     logger.info(f"verify_jwt: token received with alg={alg}, kid={unverified_header.get('kid')}")
 
-    # If the token is signed with an asymmetric algorithm (e.g. ES256, RS256)
-    if alg in ["ES256", "RS256", "ES384", "ES512", "RS384", "RS512"]:
-        jwks_client = get_jwks_client()
-        if jwks_client:
-            try:
-                signing_key = jwks_client.get_signing_key_from_jwt(token)
-                payload = jwt.decode(
-                    token,
-                    signing_key.key,
-                    algorithms=[alg],
-                    options={"verify_aud": False},
-                )
-                logger.info(f"verify_jwt: successfully verified {alg} token for sub={payload.get('sub')}")
-                return payload
-            except jwt.ExpiredSignatureError:
-                logger.warning("verify_jwt: token has expired")
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Token has expired",
-                )
-            except Exception as e:
-                logger.warning(f"verify_jwt: JWKS verification failed for alg {alg}: {e}")
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Invalid token",
-                )
-        else:
-            logger.warning(f"No JWKS client available to verify {alg} token (SUPABASE_URL not configured)")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token",
-            )
+    if alg not in ["ES256", "RS256", "ES384", "ES512", "RS384", "RS512"]:
+        logger.warning(f"verify_jwt: unsupported algorithm {alg!r}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token",
+        )
 
-    # Symmetric verification (HS256)
-    secret = settings.supabase_jwt_secret or DEFAULT_FALLBACK_JWT_SECRET
+    jwks_client = get_jwks_client()
+    if not jwks_client:
+        logger.warning("No JWKS client available (SUPABASE_URL not configured)")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token",
+        )
+
     try:
+        signing_key = jwks_client.get_signing_key_from_jwt(token)
         payload = jwt.decode(
             token,
-            secret,
-            algorithms=["HS256"],
+            signing_key.key,
+            algorithms=[alg],
             options={"verify_aud": False},
         )
+        logger.info(f"verify_jwt: successfully verified {alg} token for sub={payload.get('sub')}")
         return payload
     except jwt.ExpiredSignatureError:
+        logger.warning("verify_jwt: token has expired")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token has expired",
         )
-    except (jwt.PyJWTError, Exception) as e:
-        logger.warning(f"JWT decode failed: {e}")
+    except Exception as e:
+        logger.warning(f"verify_jwt: JWKS verification failed for alg {alg}: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token",

@@ -17,7 +17,6 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_publishable_key: str = ""
     supabase_secret_key: str = ""
-    supabase_jwt_secret: str = ""
 
     # Deprecated aliases — use SUPABASE_PUBLISHABLE_KEY / SUPABASE_SECRET_KEY instead.
     # Kept for backward compatibility with older .env files that use the legacy

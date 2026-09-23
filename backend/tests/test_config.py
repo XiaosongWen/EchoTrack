@@ -30,13 +30,12 @@ class TestSettingsDefaults:
 
     def test_supabase_defaults(self, monkeypatch):
         for key in ("SUPABASE_URL", "SUPABASE_PUBLISHABLE_KEY", "SUPABASE_SECRET_KEY",
-                     "SUPABASE_JWT_SECRET", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY"):
+                     "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY"):
             monkeypatch.delenv(key, raising=False)
         s = Settings(_env_file=None, _yaml_file="configs/dev.yaml")
         assert s.supabase_url == ""
         assert s.supabase_publishable_key == ""
         assert s.supabase_secret_key == ""
-        assert s.supabase_jwt_secret == ""
 
 
 class TestSettingsEnvOverride:
@@ -86,10 +85,6 @@ class TestSettingsEnvOverride:
         s = Settings(_env_file=None)
         assert s.supabase_url == "https://test.supabase.co"
 
-    def test_supabase_jwt_secret_override(self, monkeypatch):
-        monkeypatch.setenv("SUPABASE_JWT_SECRET", "super-secret-jwt")
-        s = Settings(_env_file=None)
-        assert s.supabase_jwt_secret == "super-secret-jwt"
 
     def test_storage_path_override(self, monkeypatch):
         monkeypatch.setenv("STORAGE_PATH", "/data/storage")

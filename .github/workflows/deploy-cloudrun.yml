@@ -89,8 +89,7 @@ jobs:
               DATABASE_URL=echotrack-database-url:latest,\
               SUPABASE_URL=echotrack-supabase-url:latest,\
               SUPABASE_PUBLISHABLE_KEY=echotrack-supabase-publishable-key:latest,\
-              SUPABASE_SECRET_KEY=echotrack-supabase-secret-key:latest,\
-              SUPABASE_JWT_SECRET=echotrack-supabase-jwt-secret:latest" \
+              SUPABASE_SECRET_KEY=echotrack-supabase-secret-key:latest" \
             --service-account="${{ secrets.GCP_SERVICE_ACCOUNT }}" \
             --min-instances=0 \
             --max-instances=10 \

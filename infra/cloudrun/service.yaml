@@ -10,7 +10,6 @@
 #   echotrack-supabase-url
 #   echotrack-supabase-publishable-key
 #   echotrack-supabase-secret-key
-#   echotrack-supabase-jwt-secret
 #
 # Required substitution before deploying:
 #   Replace <GCP_PROJECT_ID> and <IMAGE> with real values, or use the
@@ -73,11 +72,6 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: echotrack-supabase-secret-key
-                  key: latest
-            - name: SUPABASE_JWT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: echotrack-supabase-jwt-secret
                   key: latest
           # Liveness / startup probe — Cloud Run uses this to route traffic.
           livenessProbe:

@@ -5,14 +5,16 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from config import settings
-from core.auth import DEFAULT_FALLBACK_JWT_SECRET
 from database import get_db
 from main import app
 from models.user import User
 
+# Fixed secret used only for HS256 test token minting — never used in production.
+_TEST_JWT_SECRET = "test-only-jwt-secret-32-bytes-xx"
+
 
 def create_mock_jwt(user_id: uuid.UUID, email: str = "test@example.com", expired: bool = False, secret: str = None) -> str:
-    secret = secret or settings.supabase_jwt_secret or DEFAULT_FALLBACK_JWT_SECRET
+    secret = secret or _TEST_JWT_SECRET
     exp = datetime.now(timezone.utc) + (timedelta(seconds=-60) if expired else timedelta(hours=1))
     payload = {
         "sub": str(user_id),
