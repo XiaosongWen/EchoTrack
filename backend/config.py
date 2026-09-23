@@ -9,7 +9,6 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://echotrack:echotrack@localhost:5432/echotrack"
     redis_url: str = ""
     storage_path: str = "./echotrack-storage"
-
     # CORS — comma-separated list of allowed origins.
     # In Cloud Run set CORS_ORIGINS=https://your-project.pages.dev,https://yourdomain.com
     cors_origins: List[str] = []
