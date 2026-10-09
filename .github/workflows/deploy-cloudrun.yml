@@ -7,7 +7,6 @@ on:
     branches: [master, main]
     paths:
       - "backend/**"
-      - "infra/cloudrun/**"
       - ".github/workflows/deploy-cloudrun.yml"
   workflow_dispatch:
     inputs:
@@ -75,21 +74,33 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
-      # ── Deploy new revision with NO traffic (old revision keeps serving) ────────
-      - name: Deploy New Revision (no traffic)
+      # ── Deploy new revision (tagged "candidate") ──────────────────────────────
+      # On an existing service the revision gets 0% traffic so the old one keeps
+      # serving. --no-traffic is rejected by gcloud when *creating* a service, so
+      # the very first deploy goes live directly (there is nothing to protect yet).
+      - name: Deploy New Revision
+        id: deploy
         run: |
-          FULL_IMAGE="${{ env.DOCKERHUB_IMAGE }}:${{ steps.tag.outputs.tag }}"
-          gcloud run deploy ${{ env.SERVICE_NAME }} \
-            --image="${FULL_IMAGE}" \
-            --region="${{ env.GCP_REGION }}" \
-            --project="${{ secrets.GCP_PROJECT_ID }}" \
-            --no-traffic \
-            --set-env-vars="APP_ENV=prod,CORS_ORIGINS=${{ secrets.CORS_ORIGINS }}" \
-            --set-secrets="\
-              DATABASE_URL=echotrack-database-url:latest,\
-              SUPABASE_URL=echotrack-supabase-url:latest,\
-              SUPABASE_PUBLISHABLE_KEY=echotrack-supabase-publishable-key:latest,\
-              SUPABASE_SECRET_KEY=echotrack-supabase-secret-key:latest" \
+          set -euo pipefail
+          SVC="${{ env.SERVICE_NAME }}"
+          REGION="${{ env.GCP_REGION }}"
+          PROJECT="${{ secrets.GCP_PROJECT_ID }}"
+
+          TRAFFIC_FLAG=""
+          if gcloud run services describe "$SVC" --region="$REGION" --project="$PROJECT" >/dev/null 2>&1; then
+            TRAFFIC_FLAG="--no-traffic"
+          else
+            echo "Service does not exist yet — first deploy goes live directly."
+          fi
+
+          # '^@^' makes '@' the list delimiter so CORS_ORIGINS may contain commas.
+          gcloud run deploy "$SVC" \
+            --image="${{ env.DOCKERHUB_IMAGE }}:${{ steps.tag.outputs.tag }}" \
+            --region="$REGION" \
+            --project="$PROJECT" \
+            --tag=candidate ${TRAFFIC_FLAG} \
+            --set-env-vars="^@^APP_ENV=prod@CORS_ORIGINS=${{ secrets.CORS_ORIGINS }}" \
+            --set-secrets="DATABASE_URL=echotrack-database-url:latest,SUPABASE_URL=echotrack-supabase-url:latest,SUPABASE_PUBLISHABLE_KEY=echotrack-supabase-publishable-key:latest,SUPABASE_SECRET_KEY=echotrack-supabase-secret-key:latest" \
             --service-account="${{ secrets.GCP_SERVICE_ACCOUNT }}" \
             --min-instances=0 \
             --max-instances=10 \
@@ -98,71 +109,49 @@ jobs:
             --memory=512Mi \
             --port=8080 \
             --timeout=300 \
-            --format="value(status.latestCreatedRevisionName)" \
-            | tee /tmp/new_revision.txt
-          echo "new_revision=$(cat /tmp/new_revision.txt)" >> $GITHUB_ENV
+            --allow-unauthenticated
 
-      # Make service publicly invocable (idempotent — safe to run every deploy)
-      - name: Allow Public Invocations
-        run: |
-          gcloud run services add-iam-policy-binding ${{ env.SERVICE_NAME }} \
-            --region="${{ env.GCP_REGION }}" \
-            --project="${{ secrets.GCP_PROJECT_ID }}" \
-            --member="allUsers" \
-            --role="roles/run.invoker" \
-            --quiet || true
+          # URL of the tagged revision (reachable even at 0% traffic).
+          CANDIDATE_URL=$(gcloud run services describe "$SVC" \
+            --region="$REGION" --project="$PROJECT" --format=json \
+            | jq -r '.status.traffic[] | select(.tag=="candidate") | .url')
+          if [ -z "$CANDIDATE_URL" ] || [ "$CANDIDATE_URL" = "null" ]; then
+            echo "❌ Could not find the candidate revision URL."
+            exit 1
+          fi
+          echo "candidate_url=${CANDIDATE_URL}" >> "$GITHUB_OUTPUT"
+          echo "Candidate URL: ${CANDIDATE_URL}"
 
       # ── Smoke-test the NEW revision directly (old revision still serving) ─────
       - name: Smoke Test New Revision
         run: |
-          # Get the URL for the specific new revision (not the service URL which
-          # still points at the old revision while --no-traffic is in effect).
-          REVISION_URL=$(gcloud run revisions describe "${{ env.new_revision }}" \
-            --region="${{ env.GCP_REGION }}" \
-            --project="${{ secrets.GCP_PROJECT_ID }}" \
-            --format="value(status.url)" 2>/dev/null || true)
-
-          # Fallback: use service URL with revision header (always works)
-          SERVICE_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
-            --region="${{ env.GCP_REGION }}" \
-            --project="${{ secrets.GCP_PROJECT_ID }}" \
-            --format="value(status.url)")
-          TEST_URL="${REVISION_URL:-$SERVICE_URL}"
-
-          echo "Smoke testing revision: ${{ env.new_revision }}"
-          echo "Test URL: ${TEST_URL}/api/v1/health"
-
-          # Retry up to 60 s for the new revision to warm up.
+          URL="${{ steps.deploy.outputs.candidate_url }}/api/v1/health"
           for i in $(seq 1 12); do
-            HTTP_STATUS=$(curl -s -o /tmp/health_body.txt -w "%{http_code}" \
-              -H "Authorization: Bearer $(gcloud auth print-identity-token)" \
-              "${TEST_URL}/api/v1/health")
+            HTTP_STATUS=$(curl -s -o /tmp/health_body.txt -w "%{http_code}" "$URL" || true)
             if [ "${HTTP_STATUS}" = "200" ]; then
-              echo "✅ Health check passed (HTTP 200). Revision is healthy."
+              echo "✅ Health check passed (HTTP 200)."
               cat /tmp/health_body.txt
               exit 0
             fi
             echo "Attempt ${i}/12 — HTTP ${HTTP_STATUS}, retrying in 5 s..."
             sleep 5
           done
-
-          echo "❌ Health check failed after 60 s — keeping old revision live."
+          echo "❌ Health check failed after 60 s — traffic NOT migrated."
           exit 1
 
-      # ── Migrate traffic ONLY after successful smoke test ──────────────────────
+      # ── Migrate traffic ONLY after a successful smoke test ────────────────────
       - name: Migrate Traffic to New Revision
         run: |
           gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
             --region="${{ env.GCP_REGION }}" \
             --project="${{ secrets.GCP_PROJECT_ID }}" \
-            --to-latest
-          echo "✅ Traffic migrated to ${{ env.new_revision }}"
+            --to-latest \
+            --remove-tags=candidate
+          echo "✅ Traffic migrated to the new revision."
 
-      # ── Rollback on failure ───────────────────────────────────────────────────
-      - name: Rollback on Failure
+      - name: Report Failure
         if: failure()
         run: |
-          echo "⚠️  Deployment failed — old revision is still serving 100% traffic."
-          echo "New revision ${{ env.new_revision }} received no traffic."
-          echo "To manually rollback or investigate:"
+          echo "⚠️  Deployment failed. If the service already existed, the previous revision is still serving 100% traffic."
+          echo "Investigate with:"
           echo "  gcloud run revisions list --service=${{ env.SERVICE_NAME }} --region=${{ env.GCP_REGION }} --project=${{ secrets.GCP_PROJECT_ID }}"
